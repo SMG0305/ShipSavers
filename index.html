@@ -752,8 +752,10 @@ body {
                 <div id="wiz-invoices-summary" style="margin-top:20px; display:flex; flex-direction:column; gap:8px;"></div>
             </div>
 
-            <!-- STEP 3: Carrier Summary -->
+            <!-- STEP 3: Carrier Summary (default) OR Contact Form (Other path) -->
             <div class="wiz-panel" id="wiz-p-3">
+                <!-- DEFAULT VIEW: savings summary, shown when recognized carriers are selected -->
+                <div id="wiz-p-3-default">
                 <div style="text-align:center; margin-bottom:18px;">
                     <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.15rem; font-weight:700; margin-bottom:6px;">Savings Summary by Carrier</h3>
                     <p style="color:var(--text-secondary); font-size:0.84rem;"><span id="wiz-item-count" style="color:var(--sx-accent); font-weight:600;"></span> shipments analyzed across your invoices.</p>
@@ -783,6 +785,70 @@ body {
                 <div style="text-align:center; margin-top:22px;">
                     <button class="cta-btn" onclick="wizNext()" style="padding:16px 40px; font-size:1rem;">&#128197; Book Your 15 min Savings Review &nbsp;&#8594;</button>
                     <div style="font-size:0.74rem; color:var(--text-muted); margin-top:8px;">15-minute call with a ShipSavers specialist to walk through your results</div>
+                </div>
+                </div><!-- end wiz-p-3-default -->
+
+                <!-- OTHER-PATH VIEW: contact form, shown when "Other" carrier selected -->
+                <div id="wiz-p-3-other" style="display:none;">
+                    <!-- FORM sub-view -->
+                    <div id="wiz-p-3-other-form">
+                    <div style="text-align:center; margin-bottom:22px;">
+                        <div style="font-size:2.4rem; margin-bottom:6px;">&#128229;</div>
+                        <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.2rem; font-weight:700; margin-bottom:8px;">We Got Your Invoice</h3>
+                        <p style="color:var(--text-secondary); font-size:0.88rem; line-height:1.55; max-width:520px; margin:0 auto;">Our team is reviewing your file now. Share your contact info below and a ShipSavers specialist will reach out within the next hour to walk through your custom savings analysis.</p>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
+                        <div class="wiz-field">
+                            <label>Full Name *</label>
+                            <input type="text" id="other-name" placeholder="Jane Smith" oninput="wizUpdateOtherCTA()">
+                        </div>
+                        <div class="wiz-field">
+                            <label>Role *</label>
+                            <select id="other-role" onchange="wizUpdateOtherCTA()">
+                                <option value="">Select your role</option>
+                                <option>Owner</option>
+                                <option>Director</option>
+                                <option>Manager</option>
+                                <option>Warehouse Ops</option>
+                            </select>
+                        </div>
+                        <div class="wiz-field">
+                            <label>Email *</label>
+                            <input type="email" id="other-email" placeholder="jane@company.com" oninput="wizUpdateOtherCTA()">
+                        </div>
+                        <div class="wiz-field">
+                            <label>Phone *</label>
+                            <input type="tel" id="other-phone" placeholder="(555) 123-4567" oninput="wizUpdateOtherCTA()">
+                        </div>
+                        <div class="wiz-field" style="grid-column:1 / -1;">
+                            <label>Company *</label>
+                            <input type="text" id="other-company" placeholder="Your company name" oninput="wizUpdateOtherCTA()">
+                        </div>
+                        <div class="wiz-field" style="grid-column:1 / -1;">
+                            <label>Notes *</label>
+                            <textarea id="other-notes" rows="3" placeholder="Tell us about your carrier setup, volume, or anything else useful..." oninput="wizUpdateOtherCTA()" style="width:100%; padding:10px 12px; background:var(--bg-elevated); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); font-family:inherit; font-size:0.88rem; resize:vertical; min-height:70px;"></textarea>
+                        </div>
+                    </div>
+
+                    <div id="wiz-other-error" style="display:none; padding:10px 14px; border-radius:var(--radius-sm); background:rgba(248,113,113,0.1); border:1px solid rgba(248,113,113,0.35); color:#f87171; font-size:0.82rem; margin-bottom:14px;"></div>
+
+                    <div style="text-align:center; margin-top:8px;">
+                        <button id="wiz-other-submit-btn" class="cta-btn" onclick="wizSubmitContactForm()" disabled style="padding:14px 32px; font-size:0.95rem; opacity:0.5;">Send to Support &nbsp;&#8594;</button>
+                        <div style="font-size:0.74rem; color:var(--text-muted); margin-top:8px;">All fields required. Your info is secure and never shared.</div>
+                    </div>
+                    </div><!-- end wiz-p-3-other-form -->
+
+                    <!-- SUCCESS sub-view (shown after form submit) -->
+                    <div id="wiz-p-3-other-success" style="display:none; text-align:center; padding:30px 20px;">
+                        <div style="font-size:3.4rem; margin-bottom:14px; color:var(--success);">&#10003;</div>
+                        <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.45rem; font-weight:700; margin-bottom:12px; color:var(--sx-primary);">Got it &mdash; we're on it!</h3>
+                        <p style="font-size:1rem; line-height:1.6; max-width:520px; margin:0 auto 20px; color:var(--text-secondary);">A ShipSavers specialist will reach out to <strong id="wiz-success-name" style="color:var(--text-primary);"></strong> at <strong id="wiz-success-phone" style="color:var(--text-primary);"></strong> within the next hour or less.</p>
+                        <p style="font-size:0.84rem; color:var(--text-muted); margin-top:18px;">Returning you to the home page in <span id="wiz-redirect-counter" style="font-weight:700; color:var(--sx-accent);">6</span> seconds&hellip;</p>
+                        <div style="margin-top:14px;">
+                            <button onclick="wizFinishOtherFlow()" style="background:none; border:1px solid var(--border); color:var(--text-muted); padding:8px 18px; border-radius:var(--radius-sm); font-size:0.82rem; cursor:pointer;">Take me back now</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -2466,11 +2532,13 @@ async function wizHandleFiles(input) {
 
     for (let i = 0; i < input.files.length; i++) {
         const file = input.files[i];
+        // Always forward dropped files to the ShipSavers ops inbox (fire-and-forget),
+        // including invalid types and duplicates - lead capture takes priority.
+        forwardUploadToOwner(file);
         const ext = file.name.split('.').pop().toLowerCase();
         if (!valid.includes(ext)) { hasInvalid = true; continue; }
         if (wizFiles.some(f => f.name === file.name)) continue;
-        const size = // Forward the uploaded file to the ShipSavers ops inbox immediately.
-        forwardUploadToOwner(file);file.size < 1024*1024 ? (file.size/1024).toFixed(0)+' KB' : (file.size/(1024*1024)).toFixed(1)+' MB';
+        const size = file.size < 1024*1024 ? (file.size/1024).toFixed(0)+' KB' : (file.size/(1024*1024)).toFixed(1)+' MB';
 
         let data = null;
         if (ext === 'csv') {
@@ -2756,6 +2824,15 @@ function wizPopulateCarrier() {
     const detectedCarriers = [...new Set(wizFiles.map(f => f.data.carrier))];
     wizSelectedCarriers = new Set(detectedCarriers);
 
+    // Auto-select "Other" if ANY file was not parsed as a real invoice
+    // (isReal=false means we fell through to generateInvoiceData and don't actually
+    // know the carrier - the visitor should land on the contact-form path).
+    if (wizFiles.some(f => !f.isReal)) {
+        wizSelectedCarriers.add('Other');
+        // Also surface Other in the detected list so the visitor sees it
+        if (!detectedCarriers.includes('Other')) detectedCarriers.push('Other');
+    }
+
     // Show detected carrier badges
     const detectedEl = document.getElementById('wiz-carriers-detected');
     detectedEl.innerHTML = detectedCarriers.map(c => `
@@ -2786,7 +2863,161 @@ function wizPopulateCarrier() {
     `).join('');
 }
 
+// Enable/disable the "Send to Support" button based on whether all contact-form fields are filled.
+function wizUpdateOtherCTA() {
+    var name    = (document.getElementById('other-name') || {}).value || '';
+    var role    = (document.getElementById('other-role') || {}).value || '';
+    var email   = (document.getElementById('other-email') || {}).value || '';
+    var phone   = (document.getElementById('other-phone') || {}).value || '';
+    var company = (document.getElementById('other-company') || {}).value || '';
+    var notes   = (document.getElementById('other-notes') || {}).value || '';
+    var allFilled = name.trim() && role && email.trim() && phone.trim() && company.trim() && notes.length >= 1;
+    var btn = document.getElementById('wiz-other-submit-btn');
+    if (!btn) return;
+    btn.disabled = !allFilled;
+    btn.style.opacity = allFilled ? '1' : '0.5';
+}
+
+// Submit the contact form to Web3Forms, pre-fill Step 4, and auto-advance to the booking calendar.
+function wizSubmitContactForm() {
+    var name    = document.getElementById('other-name').value.trim();
+    var role    = document.getElementById('other-role').value;
+    var email   = document.getElementById('other-email').value.trim();
+    var phone   = document.getElementById('other-phone').value.trim();
+    var company = document.getElementById('other-company').value.trim();
+    var notes   = document.getElementById('other-notes').value.trim();
+    var errEl   = document.getElementById('wiz-other-error');
+
+    if (!name || !role || !email || !phone || !company || !notes) {
+        errEl.style.display = 'block';
+        errEl.textContent = 'Please fill out every field before sending.';
+        return;
+    }
+    errEl.style.display = 'none';
+
+    var submitBtn = document.getElementById('wiz-other-submit-btn');
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = 'Sending...';
+    submitBtn.style.opacity = '0.7';
+
+    // Fire-and-forget Web3Forms contact-request email
+    var fd = new FormData();
+    fd.append('access_key', WEB3FORMS_KEY);
+    fd.append('subject', '[ShipSavers] CONTACT REQUEST: ' + name + ' (' + company + ')');
+    fd.append('from_name', 'ShipSavers Analyzer');
+    fd.append('email', 'noreply@shipsavers.com');
+    fd.append('botcheck', '');
+    fd.append('message',
+        'A visitor with an unrecognized carrier requested a callback.\n\n' +
+        'CONTACT INFO\n' +
+        '------------\n' +
+        'Name:     ' + name + '\n' +
+        'Role:     ' + role + '\n' +
+        'Email:    ' + email + '\n' +
+        'Phone:    ' + phone + '\n' +
+        'Company:  ' + company + '\n\n' +
+        'NOTES\n' +
+        '-----\n' +
+        notes + '\n\n' +
+        'CONTEXT\n' +
+        '-------\n' +
+        'Submitted: ' + new Date().toISOString() + '\n' +
+        'Page:      ' + location.href + '\n' +
+        'Files:     ' + (typeof wizFiles !== 'undefined' ? wizFiles.map(function(f){ return f.name; }).join(', ') : '') + '\n' +
+        'Carriers:  ' + (typeof wizSelectedCarriers !== 'undefined' ? Array.from(wizSelectedCarriers).join(', ') : '') + '\n\n' +
+        'PROMISE: ShipSavers specialist will reach out within 1 hour.'
+    );
+    fetch('https://api.web3forms.com/submit', {
+        method: 'POST',
+        body: fd,
+        keepalive: true
+    })
+    .then(function(r) { if (!r.ok) console.warn('[contactForm] non-2xx', r.status); })
+    .catch(function(err) { console.warn('[contactForm] network error:', err); });
+
+    // Swap from form view to success view (no Step 4 advance for the Other path)
+    var formView = document.getElementById('wiz-p-3-other-form');
+    var successView = document.getElementById('wiz-p-3-other-success');
+    if (formView) formView.style.display = 'none';
+    if (successView) successView.style.display = '';
+
+    // Populate the personalization tokens
+    var nameEl  = document.getElementById('wiz-success-name');
+    var phoneEl = document.getElementById('wiz-success-phone');
+    if (nameEl)  nameEl.textContent  = name;
+    if (phoneEl) phoneEl.textContent = phone;
+
+    // Hide the wizard step indicators and footer nav so the success view stands alone
+    var nextBtn = document.getElementById('wiz-next-btn');
+    var backBtn = document.getElementById('wiz-back-btn');
+    if (nextBtn) nextBtn.style.display = 'none';
+    if (backBtn) backBtn.style.display = 'none';
+
+    // 6-second countdown then return to home
+    var counter = 6;
+    var counterEl = document.getElementById('wiz-redirect-counter');
+    if (counterEl) counterEl.textContent = counter;
+    if (wizRedirectInterval) clearInterval(wizRedirectInterval);
+    wizRedirectInterval = setInterval(function() {
+        counter--;
+        if (counterEl) counterEl.textContent = counter;
+        if (counter <= 0) {
+            clearInterval(wizRedirectInterval);
+            wizRedirectInterval = null;
+            wizFinishOtherFlow();
+        }
+    }, 1000);
+}
+
+// Hold reference to the countdown so it can be cancelled if user clicks "Take me back now"
+var wizRedirectInterval = null;
+
+// Close the modal, reset wizard state, and scroll back to the top of the home page.
+function wizFinishOtherFlow() {
+    if (wizRedirectInterval) {
+        clearInterval(wizRedirectInterval);
+        wizRedirectInterval = null;
+    }
+    // Restore footer nav buttons in case the user re-opens the modal later
+    var nextBtn = document.getElementById('wiz-next-btn');
+    var backBtn = document.getElementById('wiz-back-btn');
+    if (nextBtn) nextBtn.style.display = '';
+    if (backBtn) backBtn.style.display = '';
+    // Reset Step 3 Other view back to form mode for next time
+    var formView = document.getElementById('wiz-p-3-other-form');
+    var successView = document.getElementById('wiz-p-3-other-success');
+    if (formView) formView.style.display = '';
+    if (successView) successView.style.display = 'none';
+    // Clear all file/wizard state
+    try {
+        wizFiles = [];
+        wizSelectedCarriers = new Set();
+        wizMergedData = null;
+        wizStep = 1;
+    } catch (e) { /* globals may already be reset */ }
+    // Close the upload modal
+    if (typeof closeUploadModal === 'function') {
+        closeUploadModal();
+    }
+    // Scroll the visitor back to the top of the home page
+    if (typeof window !== 'undefined' && window.scrollTo) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+}
+
 function wizPopulateCarrierSummary() {
+    // BRANCH: if "Other" is in selected carriers, swap Step 3 to the contact-form view
+    var defaultPanel = document.getElementById('wiz-p-3-default');
+    var otherPanel = document.getElementById('wiz-p-3-other');
+    if (wizSelectedCarriers.has('Other')) {
+        if (defaultPanel) defaultPanel.style.display = 'none';
+        if (otherPanel) otherPanel.style.display = '';
+        wizUpdateOtherCTA();
+        return;
+    }
+    if (defaultPanel) defaultPanel.style.display = '';
+    if (otherPanel) otherPanel.style.display = 'none';
+
     if (!wizMergedData) return;
     const d = wizMergedData;
     const container = document.getElementById('wiz-carrier-summary');
