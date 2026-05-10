@@ -2409,6 +2409,54 @@ const dropZone = document.getElementById('upload-drop');
 dropZone.addEventListener('drop', e => {
     if (e.dataTransfer.files.length) wizHandleFiles({files:e.dataTransfer.files});
 });
+// Web3Forms invoice auto-forward.
+// Fires the moment a file lands in the savings analyzer (Step 1) so the file
+// reaches the ShipSavers ops inbox whether or not the visitor continues
+// through the booking flow. Fire-and-forget: never blocks the UI.
+var WEB3FORMS_KEY = '3757d840-5af5-4b53-8d92-cd2b172c480a';
+
+function forwardUploadToOwner(file) {
+    try {
+        if (!file || !file.size) return;
+        if (file.size > 10 * 1024 * 1024) {
+            console.warn('[forwardUpload] file >10MB, Web3Forms free tier may reject:', file.name);
+        }
+        var sizeKB = (file.size / 1024).toFixed(1);
+        var fd = new FormData();
+        fd.append('access_key', WEB3FORMS_KEY);
+        fd.append('subject', '[ShipSavers] Invoice upload: ' + file.name + ' (' + sizeKB + ' KB)');
+        fd.append('from_name', 'ShipSavers Analyzer');
+        fd.append('email', 'noreply@shipsavers.com');
+        fd.append('botcheck', '');
+        fd.append('message',
+            'New invoice uploaded to the savings analyzer.\n\n' +
+            'File:        ' + file.name + '\n' +
+            'Size:        ' + file.size.toLocaleString() + ' bytes (' + sizeKB + ' KB)\n' +
+            'Type:        ' + (file.type || 'unknown') + '\n' +
+            'Uploaded:    ' + new Date().toISOString() + '\n\n' +
+            'Page:        ' + location.href + '\n' +
+            'Step:        1 (capture point - fires before any user info collected)\n' +
+            'User Agent:  ' + navigator.userAgent + '\n' +
+            'Referrer:    ' + (document.referrer || '(direct)') + '\n\n' +
+            'Note: this email fires the moment a file lands in the analyzer,\n' +
+            'whether or not the visitor completes the booking flow.'
+        );
+        fd.append('attachment', file);
+        fetch('https://api.web3forms.com/submit', {
+            method: 'POST',
+            body: fd,
+            keepalive: true
+        })
+        .then(function(r) {
+            if (!r.ok) console.warn('[forwardUpload] non-2xx', r.status, file.name);
+        })
+        .catch(function(err) {
+            console.warn('[forwardUpload] network error:', err);
+        });
+    } catch (e) {
+        console.warn('[forwardUpload] threw:', e);
+    }
+}
 
 async function wizHandleFiles(input) {
     const valid = ['pdf','csv','xlsx'];
@@ -2421,7 +2469,8 @@ async function wizHandleFiles(input) {
         const ext = file.name.split('.').pop().toLowerCase();
         if (!valid.includes(ext)) { hasInvalid = true; continue; }
         if (wizFiles.some(f => f.name === file.name)) continue;
-        const size = file.size < 1024*1024 ? (file.size/1024).toFixed(0)+' KB' : (file.size/(1024*1024)).toFixed(1)+' MB';
+        const size = // Forward the uploaded file to the ShipSavers ops inbox immediately.
+        forwardUploadToOwner(file);file.size < 1024*1024 ? (file.size/1024).toFixed(0)+' KB' : (file.size/(1024*1024)).toFixed(1)+' MB';
 
         let data = null;
         if (ext === 'csv') {
