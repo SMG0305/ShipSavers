@@ -2715,6 +2715,12 @@ async function wizHandleFiles(input) {
         if (wizFiles.some(f => f.name === file.name)) continue;
         const size = file.size < 1024*1024 ? (file.size/1024).toFixed(0)+' KB' : (file.size/(1024*1024)).toFixed(1)+' MB';
 
+        // Push a placeholder entry IMMEDIATELY (before any async work) so the
+        // DROPPED LEAD trigger fires even if the visitor closes the modal in
+        // the brief window before the parser finishes.
+        const wizFileEntry = { name: file.name, size, ext, data: null, isReal: false, _file: file };
+        wizFiles.push(wizFileEntry);
+
         let data = null;
         let isReal = false;
         if (ext === 'csv') {
@@ -2750,8 +2756,9 @@ async function wizHandleFiles(input) {
                 isReal = true;
             }
         }
-        // _file holds the raw File object so it can be attached to the Step 4 email later.
-        wizFiles.push({ name: file.name, size, ext, data, isReal, _file: file });
+        // Update the placeholder with parsed data now that async work has completed.
+        wizFileEntry.data = data;
+        wizFileEntry.isReal = isReal;
     }
 
     if (hasInvalid && wizFiles.length === 0) {
