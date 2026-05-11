@@ -2520,7 +2520,7 @@ dropZone.addEventListener('drop', e => {
 // Used by the Step 3 Other-path contact form AND by Step 4's submit/abandonment
 // email triggers. Step 1 no longer auto-forwards files - the file is held in
 // memory and only emailed when the visitor either clicks Confirm Booking on
-// Step 4 or abandons Step 4 with partial data.
+// Step 4, or closes the modal at any point after dropping a file.
 var WEB3FORMS_KEY = '3757d840-5af5-4b53-8d92-cd2b172c480a';
 
 // State flags governing the 3 ops-email triggers.
@@ -2534,17 +2534,6 @@ var wizStep4Reached = false;     // armed the first time the visitor enters Step
 var wizAnyEmailFired = false;    // true once any of the 3 triggers has sent an email
 
 // Detect whether the visitor has entered any data on Step 4
-function hasStep4PartialData() {
-    var name  = (document.getElementById('wiz-name')  || {}).value || '';
-    var role  = (document.getElementById('wiz-role')  || {}).value || '';
-    var email = (document.getElementById('wiz-email') || {}).value || '';
-    var phone = (document.getElementById('wiz-phone') || {}).value || '';
-    var anyField = !!(name.trim() || role || email.trim() || phone.trim());
-    var anyQ = document.querySelectorAll('.wiz-q-btn.selected').length > 0;
-    var anyDateTime = (typeof wizSelectedDate !== 'undefined' && wizSelectedDate) ||
-                     (typeof wizSelectedTime !== 'undefined' && wizSelectedTime);
-    return !!(anyField || anyQ || anyDateTime);
-}
 
 // Fire an ops email. Two modes:
 //   isDroppedLead=false -> BOOKED: Step 4 Confirm Booking click (requires Step 4 reached)
