@@ -486,6 +486,32 @@ body {
 /* ===== UPLOAD WIZARD ===== */
 .wiz-panel { display:none; animation:fadeIn 0.3s ease; }
 .wiz-panel.active { display:block; }
+
+/* Analysis-loading overlay (Step 2 -> Step 3 transition) */
+.wiz-loading-overlay {
+    position:absolute; inset:0; z-index:50;
+    background:rgba(var(--bg-rgb, 12, 14, 18), 0.94);
+    backdrop-filter:blur(6px);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    animation:fadeIn 0.25s ease;
+}
+.wiz-loading-spinner {
+    width:64px; height:64px;
+    border:4px solid rgba(var(--sx-primary-rgb), 0.18);
+    border-top-color:var(--sx-primary);
+    border-radius:50%;
+    animation:wiz-spin 0.85s linear infinite;
+    margin-bottom:22px;
+}
+@keyframes wiz-spin { to { transform:rotate(360deg); } }
+.wiz-loading-title {
+    font-family:'Space Grotesk',sans-serif;
+    font-size:1.15rem; font-weight:700; color:var(--text-primary);
+    margin-bottom:6px;
+}
+.wiz-loading-sub {
+    font-size:0.84rem; color:var(--text-muted);
+}
 .wiz-step-ind {
     display:flex; align-items:center; gap:7px; cursor:pointer;
     opacity:0.4; transition:opacity 0.3s; flex-shrink:0;
@@ -668,7 +694,14 @@ body {
 
 <!-- Upload Wizard Modal -->
 <div id="upload-modal" style="display:none; position:fixed; inset:0; z-index:200; background:rgba(0,0,0,0.45); backdrop-filter:blur(10px); align-items:center; justify-content:center;">
-    <div id="wizard-container" style="background:var(--bg-surface); border:1px solid var(--border-hover); border-radius:var(--radius); max-width:680px; width:94%; position:relative; animation:fadeIn 0.25s ease; overflow:hidden;">
+    <div id="wizard-container" style="background:var(--bg-surface); border:1px solid var(--border-hover); border-radius:var(--radius); max-width:680px; width:94%; max-height:92vh; display:flex; flex-direction:column; position:relative; animation:fadeIn 0.25s ease; overflow:hidden;">
+
+        <!-- Analysis loading overlay (shown during Step 2 -> Step 3 transition) -->
+        <div id="wiz-analyzing-overlay" class="wiz-loading-overlay" style="display:none;">
+            <div class="wiz-loading-spinner"></div>
+            <div class="wiz-loading-title">Analyzing your savings&hellip;</div>
+            <div class="wiz-loading-sub">Crunching rates across carriers</div>
+        </div>
 
         <!-- Wizard Header -->
         <div style="display:flex; align-items:center; justify-content:space-between; padding:18px 28px; border-bottom:1px solid var(--border); background:var(--bg-elevated);">
@@ -703,7 +736,7 @@ body {
         </div>
 
         <!-- Step Content Area -->
-        <div id="wiz-body" style="padding:28px; min-height:340px;">
+        <div id="wiz-body" style="padding:28px; flex:1 1 auto; min-height:0; overflow-y:auto;">
 
             <!-- STEP 1: Upload -->
             <div class="wiz-panel active" id="wiz-p-1">
@@ -756,12 +789,10 @@ body {
             <div class="wiz-panel" id="wiz-p-3">
                 <!-- DEFAULT VIEW: savings summary, shown when recognized carriers are selected -->
                 <div id="wiz-p-3-default">
-                <div style="text-align:center; margin-bottom:18px;">
-                    <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.15rem; font-weight:700; margin-bottom:6px;">Savings Summary by Carrier</h3>
-                    <p style="color:var(--text-secondary); font-size:0.84rem;"><span id="wiz-item-count" style="color:var(--sx-accent); font-weight:600;"></span> shipments analyzed across your invoices.</p>
-                </div>
+                <!-- Hidden counter retained so wizPopulateCarrierSummary can write into it without erroring -->
+                <span id="wiz-item-count" style="display:none;"></span>
 
-                <!-- Carrier summary tables rendered by JS -->
+                <!-- Savings headline rendered by JS -->
                 <div id="wiz-carrier-summary"></div>
 
                 <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:18px;">
@@ -2457,7 +2488,17 @@ function openUploadModal() {
 }
 
 function closeUploadModal() {
+    // DROPPED LEAD trigger: if the visitor dropped a file and is leaving without
+    // having booked (Trigger 1) or submitted the Other-path contact form (Trigger 2),
+    // fire one comprehensive capture email. sendStep4Email is self-gated:
+    //   - skips if wizAnyEmailFired is already true (BOOKED or CONTACT REQUEST won)
+    //   - skips if no files were ever dropped
+    //   - includes EVERY field the visitor touched across all 4 steps
+    sendStep4Email(true);
     document.getElementById('upload-modal').style.display = 'none';
+    // Reset trigger flags so a subsequent re-open starts fresh.
+    wizStep4Reached = false;
+    wizAnyEmailFired = false;
 }
 
 document.getElementById('upload-modal').addEventListener('click', function(e) {
@@ -2475,53 +2516,199 @@ const dropZone = document.getElementById('upload-drop');
 dropZone.addEventListener('drop', e => {
     if (e.dataTransfer.files.length) wizHandleFiles({files:e.dataTransfer.files});
 });
-// Web3Forms invoice auto-forward.
-// Fires the moment a file lands in the savings analyzer (Step 1) so the file
-// reaches the ShipSavers ops inbox whether or not the visitor continues
-// through the booking flow. Fire-and-forget: never blocks the UI.
+// Web3Forms access key.
+// Used by the Step 3 Other-path contact form AND by Step 4's submit/abandonment
+// email triggers. Step 1 no longer auto-forwards files - the file is held in
+// memory and only emailed when the visitor either clicks Confirm Booking on
+// Step 4 or abandons Step 4 with partial data.
 var WEB3FORMS_KEY = '3757d840-5af5-4b53-8d92-cd2b172c480a';
 
-function forwardUploadToOwner(file) {
-    try {
-        if (!file || !file.size) return;
-        if (file.size > 10 * 1024 * 1024) {
-            console.warn('[forwardUpload] file >10MB, Web3Forms free tier may reject:', file.name);
-        }
-        var sizeKB = (file.size / 1024).toFixed(1);
-        var fd = new FormData();
-        fd.append('access_key', WEB3FORMS_KEY);
-        fd.append('subject', '[ShipSavers] Invoice upload: ' + file.name + ' (' + sizeKB + ' KB)');
-        fd.append('from_name', 'ShipSavers Analyzer');
-        fd.append('email', 'noreply@shipsavers.com');
-        fd.append('botcheck', '');
-        fd.append('message',
-            'New invoice uploaded to the savings analyzer.\n\n' +
-            'File:        ' + file.name + '\n' +
-            'Size:        ' + file.size.toLocaleString() + ' bytes (' + sizeKB + ' KB)\n' +
-            'Type:        ' + (file.type || 'unknown') + '\n' +
-            'Uploaded:    ' + new Date().toISOString() + '\n\n' +
-            'Page:        ' + location.href + '\n' +
-            'Step:        1 (capture point - fires before any user info collected)\n' +
-            'User Agent:  ' + navigator.userAgent + '\n' +
-            'Referrer:    ' + (document.referrer || '(direct)') + '\n\n' +
-            'Note: this email fires the moment a file lands in the analyzer,\n' +
-            'whether or not the visitor completes the booking flow.'
-        );
-        fd.append('attachment', file);
-        fetch('https://api.web3forms.com/submit', {
-            method: 'POST',
-            body: fd,
-            keepalive: true
-        })
-        .then(function(r) {
-            if (!r.ok) console.warn('[forwardUpload] non-2xx', r.status, file.name);
-        })
-        .catch(function(err) {
-            console.warn('[forwardUpload] network error:', err);
-        });
-    } catch (e) {
-        console.warn('[forwardUpload] threw:', e);
+// State flags governing the 3 ops-email triggers.
+//   1. BOOKED          - Step 4 Confirm Booking click           (sendStep4Email(false))
+//   2. CONTACT REQUEST - Step 3 Other-path contact form submit  (wizSubmitContactForm)
+//   3. DROPPED LEAD    - Modal close with a file dropped but no  (sendStep4Email(true))
+//                        other email yet fired
+// All three set wizAnyEmailFired = true so a visitor session can never produce more
+// than one email regardless of what they do.
+var wizStep4Reached = false;     // armed the first time the visitor enters Step 4
+var wizAnyEmailFired = false;    // true once any of the 3 triggers has sent an email
+
+// Detect whether the visitor has entered any data on Step 4
+function hasStep4PartialData() {
+    var name  = (document.getElementById('wiz-name')  || {}).value || '';
+    var role  = (document.getElementById('wiz-role')  || {}).value || '';
+    var email = (document.getElementById('wiz-email') || {}).value || '';
+    var phone = (document.getElementById('wiz-phone') || {}).value || '';
+    var anyField = !!(name.trim() || role || email.trim() || phone.trim());
+    var anyQ = document.querySelectorAll('.wiz-q-btn.selected').length > 0;
+    var anyDateTime = (typeof wizSelectedDate !== 'undefined' && wizSelectedDate) ||
+                     (typeof wizSelectedTime !== 'undefined' && wizSelectedTime);
+    return !!(anyField || anyQ || anyDateTime);
+}
+
+// Fire an ops email. Two modes:
+//   isDroppedLead=false -> BOOKED: Step 4 Confirm Booking click (requires Step 4 reached)
+//   isDroppedLead=true  -> DROPPED LEAD: modal closed before booking, with at least one
+//                          file dropped. Captures EVERYTHING the visitor touched
+//                          across Step 1 through Step 4.
+// Deduped via wizAnyEmailFired so it can never produce more than one email per session.
+// Also blocked if the Other-path CONTACT REQUEST email already fired.
+function sendStep4Email(isDroppedLead) {
+    if (wizAnyEmailFired) return;
+    if (!isDroppedLead && !wizStep4Reached) return;
+    if (isDroppedLead && (typeof wizFiles === 'undefined' || wizFiles.length === 0)) return;
+    wizAnyEmailFired = true;
+
+    // ----- Pull everything available from every step -----
+    // Step 4 booking-form fields
+    var name  = ((document.getElementById('wiz-name')  || {}).value || '').trim();
+    var role  =  (document.getElementById('wiz-role')  || {}).value || '';
+    var email = ((document.getElementById('wiz-email') || {}).value || '').trim();
+    var phone = ((document.getElementById('wiz-phone') || {}).value || '').trim();
+
+    // Step 3 Other-path form fields (in case visitor typed there but never submitted)
+    var otherName  = ((document.getElementById('other-name')   || {}).value || '').trim();
+    var otherRole  =  (document.getElementById('other-role')   || {}).value || '';
+    var otherEmail = ((document.getElementById('other-email')  || {}).value || '').trim();
+    var otherPhone = ((document.getElementById('other-phone')  || {}).value || '').trim();
+    var otherCo    = ((document.getElementById('other-company')|| {}).value || '').trim();
+    var otherNotes = ((document.getElementById('other-notes')  || {}).value || '').trim();
+
+    // Step 2 carrier selections
+    var selectedCarriers = (typeof wizSelectedCarriers !== 'undefined')
+        ? Array.from(wizSelectedCarriers).join(', ') : '';
+
+    // Step 4 date/time
+    var dateStr = '';
+    if (typeof wizSelectedDate !== 'undefined' && wizSelectedDate) {
+        try {
+            dateStr = wizSelectedDate.toLocaleDateString('en-US', {
+                weekday:'long', month:'long', day:'numeric', year:'numeric'
+            });
+        } catch (e) { dateStr = String(wizSelectedDate); }
     }
+    var timeStr = (typeof wizSelectedTime !== 'undefined' && wizSelectedTime) ? wizSelectedTime : '';
+
+    // Step 4 qualification answers
+    var qAnswers = {};
+    document.querySelectorAll('.wiz-q-btn.selected').forEach(function(b) {
+        qAnswers[b.dataset.q] = (b.textContent || '').trim();
+    });
+
+    // ----- Build subject -----
+    var tag = isDroppedLead ? 'DROPPED LEAD' : 'BOOKED';
+    var subjectId = name || otherName || email || otherEmail ||
+                    ((typeof wizFiles !== 'undefined' && wizFiles[0]) ? wizFiles[0].name : '(no contact)');
+    var subject = '[ShipSavers] ' + tag + ': ' + subjectId;
+
+    // ----- Build body -----
+    var lines = [];
+    if (isDroppedLead) {
+        lines.push('Visitor dropped an invoice but left before booking or submitting the Other-path contact form.');
+        lines.push('All partial data captured below. The file is attached.');
+    } else {
+        lines.push('Visitor completed all 4 steps and confirmed their booking.');
+    }
+    lines.push('');
+
+    // BOOKED uses Step 4 fields; DROPPED LEAD merges Step 4 + Step 3 Other fields
+    var hasStep4Contact = !!(name || role || email || phone);
+    var hasOtherContact = !!(otherName || otherRole || otherEmail || otherPhone || otherCo || otherNotes);
+
+    if (!isDroppedLead || hasStep4Contact) {
+        lines.push('CONTACT (Step 4 booking form)');
+        lines.push('-----------------------------');
+        lines.push('Name:    ' + (name  || '(empty)'));
+        lines.push('Role:    ' + (role  || '(empty)'));
+        lines.push('Email:   ' + (email || '(empty)'));
+        lines.push('Phone:   ' + (phone || '(empty)'));
+        lines.push('');
+    }
+
+    if (isDroppedLead && hasOtherContact) {
+        lines.push('CONTACT (Step 3 Other-path form, partial)');
+        lines.push('-----------------------------------------');
+        lines.push('Name:    ' + (otherName  || '(empty)'));
+        lines.push('Role:    ' + (otherRole  || '(empty)'));
+        lines.push('Email:   ' + (otherEmail || '(empty)'));
+        lines.push('Phone:   ' + (otherPhone || '(empty)'));
+        lines.push('Company: ' + (otherCo    || '(empty)'));
+        lines.push('Notes:   ' + (otherNotes || '(empty)'));
+        lines.push('');
+    }
+
+    lines.push('BOOKING (Step 4 calendar)');
+    lines.push('-------------------------');
+    lines.push('Date:    ' + (dateStr || '(no date selected)'));
+    lines.push('Time:    ' + (timeStr ? timeStr + ' ET' : '(no time selected)'));
+    lines.push('');
+
+    lines.push('QUALIFICATION (Step 4 questions)');
+    lines.push('--------------------------------');
+    lines.push('Openness to switching:  ' + (qAnswers.openness || '(no answer)'));
+    lines.push('Biggest pain point:     ' + (qAnswers.pain     || '(no answer)'));
+    lines.push('Urgency:                ' + (qAnswers.urgency  || '(no answer)'));
+    lines.push('');
+
+    if (isDroppedLead) {
+        lines.push('STEP 2 CARRIERS SELECTED');
+        lines.push('------------------------');
+        lines.push(selectedCarriers || '(none)');
+        lines.push('');
+        lines.push('LAST STEP REACHED');
+        lines.push('-----------------');
+        lines.push('Step ' + (typeof wizStep !== 'undefined' ? wizStep : '?'));
+        lines.push('');
+    }
+
+    lines.push('INVOICE FILE(S) (' + (typeof wizFiles !== 'undefined' ? wizFiles.length : 0) + ')');
+    lines.push('----------------');
+    if (typeof wizFiles !== 'undefined') {
+        wizFiles.forEach(function(f, i) {
+            lines.push((i + 1) + '. ' + f.name + '  (' + f.size + ')' +
+                       (f.isReal ? '  [parsed: ' + (f.data && f.data.carrier ? f.data.carrier : '?') + ']'
+                                 : '  [unparsed]'));
+        });
+    }
+    if (typeof wizMergedData !== 'undefined' && wizMergedData) {
+        lines.push('');
+        lines.push('INVOICE TOTAL:  $' + (wizMergedData.totalBilled || 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}));
+        lines.push('SHIPMENTS:      ' + (wizMergedData.items ? wizMergedData.items.length.toLocaleString() : 0));
+    }
+
+    lines.push('');
+    lines.push('CONTEXT');
+    lines.push('-------');
+    lines.push('Submitted:   ' + new Date().toISOString());
+    lines.push('Trigger:     ' + (isDroppedLead ? 'Modal closed with file but no booking/contact submitted' : 'Confirm Booking click'));
+    lines.push('Page:        ' + location.href);
+    lines.push('Referrer:    ' + (document.referrer || '(direct)'));
+    lines.push('User Agent:  ' + navigator.userAgent);
+
+    // ----- Build & send -----
+    var fd = new FormData();
+    fd.append('access_key', WEB3FORMS_KEY);
+    fd.append('subject', subject);
+    fd.append('from_name', 'ShipSavers Analyzer');
+    fd.append('email', email || otherEmail || 'noreply@shipsavers.com');
+    fd.append('botcheck', '');
+    fd.append('message', lines.join('\n'));
+
+    // Web3Forms accepts up to 5 file attachments (10MB combined on free tier).
+    var fieldNames = ['attachment', 'attachment2', 'attachment3', 'attachment4', 'attachment5'];
+    if (typeof wizFiles !== 'undefined') {
+        wizFiles.slice(0, 5).forEach(function(f, i) {
+            if (f._file && f._file.size > 0) fd.append(fieldNames[i], f._file);
+        });
+    }
+
+    fetch('https://api.web3forms.com/submit', {
+        method: 'POST',
+        body: fd,
+        keepalive: true  // survives modal close / page unload
+    })
+    .then(function(r) { if (!r.ok) console.warn('[opsEmail] non-2xx', r.status, tag); })
+    .catch(function(err) { console.warn('[opsEmail] network error:', err); });
 }
 
 async function wizHandleFiles(input) {
@@ -2532,27 +2719,50 @@ async function wizHandleFiles(input) {
 
     for (let i = 0; i < input.files.length; i++) {
         const file = input.files[i];
-        // Always forward dropped files to the ShipSavers ops inbox (fire-and-forget),
-        // including invalid types and duplicates - lead capture takes priority.
-        forwardUploadToOwner(file);
+        // File is held in memory and only emailed when the visitor reaches Step 4
+        // (Confirm Booking click or Step 4 abandonment). No Step-1 forward.
         const ext = file.name.split('.').pop().toLowerCase();
         if (!valid.includes(ext)) { hasInvalid = true; continue; }
         if (wizFiles.some(f => f.name === file.name)) continue;
         const size = file.size < 1024*1024 ? (file.size/1024).toFixed(0)+' KB' : (file.size/(1024*1024)).toFixed(1)+' MB';
 
         let data = null;
+        let isReal = false;
         if (ext === 'csv') {
             try {
                 const csvText = await readFileAsText(file);
                 if (isUPSInvoice(csvText)) {
                     data = parseUPSInvoice(csvText, file.name);
+                    if (data) isReal = true;
                 } else if (isFedExInvoice(csvText)) {
                     data = parseFedExInvoice(csvText, file.name);
+                    if (data) isReal = true;
                 }
             } catch(e) { console.error('CSV parse error:', e); }
         }
-        if (!data) data = generateInvoiceData(file.name);
-        wizFiles.push({ name: file.name, size, ext, data, isReal: !!data.invoiceTotal });
+        if (!data) {
+            data = generateInvoiceData(file.name);
+            isReal = false;
+        }
+        // Filename hint fallback: if the parser didn't recognize the file but the
+        // filename clearly indicates a carrier (e.g., "UPS Invoice.csv"), trust
+        // the filename. This means the right carrier auto-selects on Step 2 even
+        // for CSV variants the parser doesn't yet support.
+        if (!isReal) {
+            const fnLower = file.name.toLowerCase();
+            const carrierFromFilename =
+                /\bups\b/.test(fnLower) ? 'UPS' :
+                (fnLower.includes('fedex') || fnLower.includes('fed-ex') || fnLower.includes('fed ex')) ? 'FedEx' :
+                (fnLower.includes('usps') || fnLower.includes('postal')) ? 'USPS' :
+                fnLower.includes('dhl') ? 'DHL' :
+                fnLower.includes('ontrac') ? 'OnTrac' : null;
+            if (carrierFromFilename) {
+                data.carrier = carrierFromFilename;
+                isReal = true;
+            }
+        }
+        // _file holds the raw File object so it can be attached to the Step 4 email later.
+        wizFiles.push({ name: file.name, size, ext, data, isReal, _file: file });
     }
 
     if (hasInvalid && wizFiles.length === 0) {
@@ -2794,13 +3004,31 @@ function wizNext() {
         return;
     }
     if (wizStep === 2) {
-        wizStep = 3;
-        wizPopulateCarrierSummary();
-        wizUpdateUI();
+        // Other-path: no savings to analyze, advance immediately to the contact form.
+        if (wizSelectedCarriers.has('Other')) {
+            wizStep = 3;
+            wizPopulateCarrierSummary();
+            wizUpdateUI();
+            return;
+        }
+        // Recognized-carrier path: show the analyzing spinner for ~3s, then reveal Step 3.
+        const nextBtn = document.getElementById('wiz-next-btn');
+        nextBtn.innerHTML = '&#9881; Analyzing&hellip;';
+        nextBtn.disabled = true;
+        nextBtn.style.opacity = '0.6';
+        const overlay = document.getElementById('wiz-analyzing-overlay');
+        if (overlay) overlay.style.display = 'flex';
+        setTimeout(() => {
+            if (overlay) overlay.style.display = 'none';
+            wizStep = 3;
+            wizPopulateCarrierSummary();
+            wizUpdateUI();
+        }, 3000);
         return;
     }
     if (wizStep === 3) {
         wizStep = 4;
+        wizStep4Reached = true;  // arm the Step 4 email triggers
         wizPopulateBooking();
         wizUpdateUI();
         return;
@@ -2820,18 +3048,14 @@ function wizPopulateCarrier() {
     if (!wizMergedData) return;
     const d = wizMergedData;
 
-    // Detect unique carriers from all files
-    const detectedCarriers = [...new Set(wizFiles.map(f => f.data.carrier))];
+    // Only count carriers from files we ACTUALLY parsed as real invoices.
+    // (Unparsed files get a placeholder carrier from generateInvoiceData's filename
+    // guess, which we don't trust - those should map to "Other" only.)
+    const realCarriers = [...new Set(wizFiles.filter(f => f.isReal).map(f => f.data.carrier))];
+    const hasUnrecognized = wizFiles.some(f => !f.isReal);
+    const detectedCarriers = realCarriers.slice();
+    if (hasUnrecognized) detectedCarriers.push('Other');
     wizSelectedCarriers = new Set(detectedCarriers);
-
-    // Auto-select "Other" if ANY file was not parsed as a real invoice
-    // (isReal=false means we fell through to generateInvoiceData and don't actually
-    // know the carrier - the visitor should land on the contact-form path).
-    if (wizFiles.some(f => !f.isReal)) {
-        wizSelectedCarriers.add('Other');
-        // Also surface Other in the detected list so the visitor sees it
-        if (!detectedCarriers.includes('Other')) detectedCarriers.push('Other');
-    }
 
     // Show detected carrier badges
     const detectedEl = document.getElementById('wiz-carriers-detected');
@@ -2927,6 +3151,9 @@ function wizSubmitContactForm() {
         'Carriers:  ' + (typeof wizSelectedCarriers !== 'undefined' ? Array.from(wizSelectedCarriers).join(', ') : '') + '\n\n' +
         'PROMISE: ShipSavers specialist will reach out within 1 hour.'
     );
+    // Mark email as fired so the DROPPED LEAD trigger doesn't double-fire on modal close.
+    wizAnyEmailFired = true;
+
     fetch('https://api.web3forms.com/submit', {
         method: 'POST',
         body: fd,
@@ -3034,7 +3261,7 @@ function wizPopulateCarrierSummary() {
     if (canBeatOverall && itemsWithSavings.length > 0) {
         // We can beat their rates — show top 2 services per carrier with savings tiers
         if (statsGrid) statsGrid.style.display = 'grid';
-        itemCountEl.parentElement.parentElement.querySelector('p').style.display = '';
+        // (static panel <p> subtitle was removed — no-op for now, kept for layout symmetry)
 
         // Helper: get savings tier from margin %
         function savingsTier(marginPct) {
@@ -3081,29 +3308,10 @@ function wizPopulateCarrierSummary() {
         else if (ourMarginPct >= 15) { rangeLow = '7.5'; rangeHigh = '9.0'; }
         else { rangeLow = '5.5'; rangeHigh = '7.5'; }
 
-        const serviceTypes = [...new Set(d.items.map(i => i.service))];
-
-        // Build carrier sections HTML
+        // Carrier badges removed per request — leave carrierHTML empty so the
+        // template's ${carrierHTML} ref injects nothing between the subtitle
+        // and the Est. Total Savings headline.
         let carrierHTML = '';
-        Object.keys(carrierGroups).forEach(carrier => {
-            const svcs = carrierGroups[carrier].sort((a, b) => b.totalBilled - a.totalBilled).slice(0, 2);
-            const svcRows = svcs.map(s => `
-                <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; background:var(--bg-elevated); border:1px solid var(--border); border-radius:var(--radius-sm);">
-                    <div>
-                        <div style="font-size:0.84rem; font-weight:600;">${s.service}</div>
-                        <div style="font-size:0.72rem; color:var(--text-muted);">${s.count.toLocaleString()} shipments &bull; $${s.totalBilled.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
-                    </div>
-                    <span style="background:rgba(var(--sx-primary-rgb),0.1); color:var(--sx-accent); padding:4px 12px; border-radius:6px; font-size:0.78rem; font-weight:700; white-space:nowrap;">Est. ${s.savingsRange}</span>
-                </div>`).join('');
-
-            carrierHTML += `
-                <div style="margin-bottom:16px;">
-                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
-                        <span style="font-family:'Space Grotesk',sans-serif; font-size:0.88rem; font-weight:700; padding:4px 12px; border-radius:var(--radius-sm); background:rgba(var(--sx-primary-rgb),0.06); border:1px solid rgba(var(--sx-primary-rgb),0.2);">${carrier}</span>
-                    </div>
-                    <div style="display:flex; flex-direction:column; gap:8px;">${svcRows}</div>
-                </div>`;
-        });
 
         container.innerHTML = `
             <div style="padding:20px 0;">
@@ -3131,7 +3339,7 @@ function wizPopulateCarrierSummary() {
     } else {
         // Can't beat their rates comprehensively — show carrier + estimated savings range + stat tiles
         if (statsGrid) statsGrid.style.display = 'grid';
-        itemCountEl.parentElement.parentElement.querySelector('p').style.display = 'none';
+        // (static panel <p> subtitle was removed — no-op for now, kept for layout symmetry)
 
         const savingsLow = '6.5';
         const savingsHigh = '7.5';
@@ -3292,6 +3500,10 @@ function wizFinish() {
     btn.innerHTML = 'Confirming...';
     btn.disabled = true;
     btn.style.opacity = '0.6';
+
+    // Trigger 1: Confirm Booking click - fire the complete submission email
+    sendStep4Email(false);
+
     setTimeout(() => {
         // Show confirmation popup
         const popup = document.getElementById('wiz-confirm-popup');
