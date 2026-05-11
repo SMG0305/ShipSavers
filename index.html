@@ -2691,7 +2691,7 @@ function sendStep4Email(isDroppedLead) {
         });
     }
 
-    fetch('https://api.web3forms.com/submit', {
+    fetch('/api/lead', {
         method: 'POST',
         body: fd,
         keepalive: true  // survives modal close / page unload
@@ -3150,7 +3150,7 @@ function wizSubmitContactForm() {
     // Mark email as fired so the DROPPED LEAD trigger doesn't double-fire on modal close.
     wizAnyEmailFired = true;
 
-    fetch('https://api.web3forms.com/submit', {
+    fetch('/api/lead', {
         method: 'POST',
         body: fd,
         keepalive: true
