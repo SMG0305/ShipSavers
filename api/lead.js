@@ -37,7 +37,7 @@ export default async function handler(req, res) {
         // Forward to Web3Forms with the SAME Content-Type header
         // (preserves the multipart boundary). The access_key inside the
         // FormData tells Web3Forms which account to route to.
-       const upstream = await fetch('https://api.web3forms.com/submit', {
+        const upstream = await fetch('https://api.web3forms.com/submit', {
             method: 'POST',
             headers: {
                 'Content-Type': req.headers['content-type'],
